@@ -7,17 +7,17 @@
 #include <SPI.h>
 #include <FS.h>
 
-// ── Режими оновлення дисплея (Waveform Modes) ─────────────
-#define UPDATE_MODE_INIT  0   // Init (повне оновлення, повільно, блимає)
-#define UPDATE_MODE_DU    1   // Direct Update (швидко, ч/б, бінарне)
-#define UPDATE_MODE_GC16  2   // Grayscale 16 (повна якість, повільно)
-#define UPDATE_MODE_GL16  3   // GL16 (швидкий сірий)
+// ── Display Update Modes (Waveform Modes) ─────────────
+#define UPDATE_MODE_INIT  0   // Init (full update, slow, blinking)
+#define UPDATE_MODE_DU    1   // Direct Update (fast, black/white, binary)
+#define UPDATE_MODE_GC16  2   // Grayscale 16 (full quality, slow)
+#define UPDATE_MODE_GL16  3   // GL16 (fast gray)
 #define UPDATE_MODE_GLR16 4   // GLR16
-#define UPDATE_MODE_GLD16 5   // GLD16 (сірий з очищенням від гостінгу - РЕКОМЕНДОВАНО ДЛЯ ЧАСТКОВИХ ОНОВЛЕНЬ)
-#define UPDATE_MODE_A2    6   // A2 (надшвидкий 2-рівневий чорно-білий)
-#define UPDATE_MODE_DU4   7   // DU4 (4 рівні сірого)
+#define UPDATE_MODE_GLD16 5   // GLD16 (gray with ghosting clearing - RECOMMENDED FOR PARTIAL UPDATES)
+#define UPDATE_MODE_A2    6   // A2 (ultra-fast 2-level black and white)
+#define UPDATE_MODE_DU4   7   // DU4 (4 gray levels)
 
-// ── Команди IT8951 ────────────────────────────────────────
+// ── IT8951 Commands ────────────────────────────────────────
 #define IT8951_TCON_SYS_RUN         0x0001
 #define IT8951_TCON_STANDBY         0x0002
 #define IT8951_TCON_SLEEP           0x0003
@@ -32,20 +32,20 @@
 #define IT8951_TCON_DPY_AREA        0x0034
 #define IT8951_TCON_DPY_BUF_AREA    0x0037
 
-// ── Регістри IT8951 ───────────────────────────────────────
+// ── IT8951 Registers ───────────────────────────────────────
 #define REG_LISAR           0x0008  // Load Image Start Reg Low
 #define REG_LISARH          0x000A  // Load Image Start Reg High
 #define REG_I80CPCR         0x0004  // CPU packed pixel enable
-#define REG_TEMP            0x0114  // Регістр температури
+#define REG_TEMP            0x0114  // Temperature register
 
-// ── SPI швидкість та Preamble ─────────────────────────────
-#define SPI_FREQ            2000000  // 2 МГц
-#define PREAMBLE_CMD        0x6000   // Перед кодом команди
-#define PREAMBLE_WRITE      0x0000   // Перед даними (запис)
-#define PREAMBLE_READ       0x1000   // Перед читанням
+// ── SPI Speed and Preamble ─────────────────────────────
+#define SPI_FREQ            2000000  // 2 MHz
+#define PREAMBLE_CMD        0x6000   // Before command code
+#define PREAMBLE_WRITE      0x0000   // Before data (write)
+#define PREAMBLE_READ       0x1000   // Before reading
 
 
-// ── Структури ─────────────────────────────────────────────
+// ── Structures ─────────────────────────────────────────────
 struct IT8951DevInfo {
     uint16_t panelW;
     uint16_t panelH;
@@ -70,24 +70,24 @@ struct IT8951LdImgInfo {
     uint16_t* pBufAddr;
 };
 
-// ── Клас бібліотеки IT8951 ───────────────────────────────
+// ── IT8951 Library Class ───────────────────────────────
 class IT8951Class {
 public:
     IT8951Class();
     ~IT8951Class();
 
-    // Ініціалізація дисплея. Виділяє пам'ять під canvas у PSRAM.
-    // Параметри:
-    //   vcom - Значення VCOM у мілівольтах (наприклад: 2330 для -2.33V)
-    //   sck, miso, mosi, cs - піни апаратного SPI
-    //   hrdy - BUSY (HOST_HRDY) вхідний пін
-    //   rst - RESET вихідний пін
-    //   pwr - POWER_CTRL вихідний пін живлення
+    // Display initialization. Allocates memory for canvas in PSRAM.
+    // Parameters:
+    //   vcom - VCOM value in millivolts (e.g., 2330 for -2.33V)
+    //   sck, miso, mosi, cs - hardware SPI pins
+    //   hrdy - BUSY (HOST_HRDY) input pin
+    //   rst - RESET output pin
+    //   pwr - POWER_CTRL power output pin
     bool begin(uint16_t vcom = 2330, 
                int8_t sck = 12, int8_t miso = 13, int8_t mosi = 11, int8_t cs = 10,
                int8_t hrdy = 6, int8_t rst = 7, int8_t pwr = 5);
 
-    // ── ГРАФІЧНІ ФУНКЦІЇ CANVAS (Малювання у PSRAM буфері) ──
+    // ── CANVAS GRAPHIC FUNCTIONS (Drawing in PSRAM buffer) ──
     void drawPixel(uint16_t x, uint16_t y, uint8_t color);
     uint8_t getPixel(uint16_t x, uint16_t y);
     void drawRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t color, bool fill);
@@ -98,86 +98,86 @@ public:
     size_t getCyrillicTextWidth(const char* str, uint8_t scale = 1);
     void drawImage(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t* data);
 
-    // ── ДИНАМІЧНИЙ TTF РЕНДЕРИНГ ──
+    // ── DYNAMIC TTF RENDERING ──
     bool loadTTF(fs::FS &fs, const char* path, uint16_t pixelHeight);
     void drawTTFText(uint16_t x, uint16_t y, const char* str, uint8_t color, uint8_t bgColor, bool transparent = true);
     size_t getTTFTextWidth(const char* str);
     void unloadTTF();
     uint16_t getTTFHeight() const { return _ttfHeight; }
 
-    // ── УПРАВЛІННЯ ДИСПЛЕЄМ (Взаємодія з платою TCON) ──────────
+    // ── DISPLAY CONTROL (Interaction with TCON board) ──────────
     
-    // Заповнити весь canvas у PSRAM одним кольором без відправки на екран
+    // Fill the entire canvas in PSRAM with a single color without sending to the screen
     void fill(uint8_t color = 0xFF);
 
-    // Залити весь canvas у PSRAM одним кольором та оновити екран повністю
+    // Fill the entire canvas in PSRAM with a single color and fully update the screen
     void clear(uint8_t color = 0xFF, uint8_t mode = UPDATE_MODE_GC16);
 
-    // Зробити повний hardware INIT цикл очищення екрану (команда 0x0034 в INIT режимі)
+    // Perform a full hardware INIT screen clearing cycle (command 0x0034 in INIT mode)
     void clearScreen();
 
-    // Передати весь canvas з PSRAM в IT8951 та оновити весь екран
+    // Transfer the entire canvas from PSRAM to IT8951 and update the entire screen
     void display(uint8_t mode = UPDATE_MODE_GC16);
 
-    // Оновити окрему область екрана (завантажує пікселі області та дає команду оновлення)
+    // Update a specific screen area (loads area pixels and sends update command)
     void updateArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t mode = UPDATE_MODE_DU);
 
-    // Дати команду оновлення області без завантаження пікселів (для низькорівневого контролю)
+    // Send an area update command without loading pixels (for low-level control)
     void displayArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t mode = UPDATE_MODE_DU);
 
-    // Перевести дисплей у режим сну та вимкнути живлення VCOM
+    // Put the display to sleep and turn off VCOM power
     void sleep();
 
-    // Пробудити дисплей після сну
+    // Wake up the display after sleep
     void wakeup();
 
-    // ── НАЛАШТУВАННЯ ТА СТАТУС ───────────────────────────────
+    // ── SETTINGS AND STATUS ───────────────────────────────
     
-    // Примусово задати температуру навколишнього середовища (у градусах Цельсія)
+    // Force set the ambient temperature (in degrees Celsius)
     void setTemperature(int8_t temp);
 
-    // Змінити тип endianness (0: Little, 1: Big Endian)
+    // Change endianness type (0: Little, 1: Big Endian)
     void setEndianness(uint8_t endianVal) { _endianType = endianVal; }
     uint8_t getEndianness() const { return _endianType; }
 
-    // Отримати ширину та висоту панелі
+    // Get panel width and height
     uint16_t getWidth() const { return _panelW; }
     uint16_t getHeight() const { return _panelH; }
 
-    // Отримати вказівник на локальний буфер у PSRAM
+    // Get pointer to the local buffer in PSRAM
     uint8_t* getCanvas() { return _imgBuf; }
 
-    // Отримати внутрішню адресу буфера зображення в пам'яті IT8951
+    // Get the internal image buffer address in IT8951 memory
     uint32_t getImgBufAddr() const { return _imgBufAddr; }
 
-    // Зчитати поточне значення VCOM (у мілівольтах)
+    // Read the current VCOM value (in millivolts)
     uint16_t getVCOM();
 
-    // Зчитати поточну температуру з термодатчика (у градусах Цельсія)
+    // Read the current temperature from the thermal sensor (in degrees Celsius)
     int8_t readTemperature();
 
-    // Перевірити, чи зайнятий рушій малювання LUT (регістр 0x1224)
+    // Check if the LUT drawing engine is busy (register 0x1224)
     bool isEngineBusy();
 
-    // Отримати інформацію про пристрій (фізична роздільна здатність, версії FW/LUT тощо)
+    // Get device info (physical resolution, FW/LUT versions, etc.)
     void getDeviceInfo(IT8951DevInfo* info);
 
 private:
-    // Піни
+    // Pins
     int8_t _pinSCK, _pinMISO, _pinMOSI, _pinCS;
     int8_t _pinHRDY, _pinRST, _pinPWR;
 
-    // Внутрішній стан
-    uint8_t* _imgBuf;       // Вказівник на буфер у PSRAM (розмір PANEL_WIDTH * PANEL_HEIGHT / 2)
-    uint32_t _imgBufAddr;   // Адреса буфера в пам'яті IT8951 (з DevInfo)
-    uint8_t  _endianType;   // Порядок байт для передачі (1: Big, 0: Little)
-    uint16_t _vcom;         // Значення VCOM
-    uint16_t _panelW;       // Ширина екрану
-    uint16_t _panelH;       // Висота екрану
-    bool     _isPowered;    // Чи подано живлення на плату
-    int8_t   _currentTemp;  // Поточна примусова температура (-99 якщо не задано)
+    // Internal state
+    uint8_t* _imgBuf;       // Pointer to buffer in PSRAM (size PANEL_WIDTH * PANEL_HEIGHT / 2)
+    uint32_t _imgBufAddr;   // Address of the buffer in IT8951 memory (from DevInfo)
+    uint8_t  _endianType;   // Byte order for transmission (1: Big, 0: Little)
+    uint16_t _vcom;         // VCOM value
+    uint16_t _panelW;       // Screen width
+    uint16_t _panelH;       // Screen height
+    bool     _isPowered;    // Whether power is supplied to the board
+    int8_t   _currentTemp;  // Current forced temperature (-99 if not set)
 
-    // Низькорівневий SPI драйвер
+    // Low-level SPI driver
     void writeCmd(uint16_t cmd);
     void writeData(uint16_t data);
     uint16_t readData();
@@ -198,7 +198,7 @@ private:
     inline void csLow()   { digitalWrite(_pinCS, LOW);  }
     inline void csHigh()  { digitalWrite(_pinCS, HIGH); }
 
-    // Стан dynamic TTF
+    // Dynamic TTF state
     unsigned char* _ttfBuffer;
     bool _ttfLoaded;
     float _ttfScale;

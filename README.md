@@ -14,7 +14,7 @@ IT8951 TTL parallel TCON board for 13.3" & 10.3" parallel-interface E-Ink displa
 
 Link: https://www.good-display.com/product/472.html
 
-<img width="640" height="546" alt="image" src="https://github.com/user-attachments/assets/d60313e7-b4f3-44cc-8ea0-4289bddd7532" />
+<img alt="image" src="https://github.com/user-attachments/assets/d60313e7-b4f3-44cc-8ea0-4289bddd7532" />
 
 3. 13.3" E Ink Carta 1000 Display – A4 Size, Wide Temperature eTC | GDEP133UT3
 
@@ -22,7 +22,7 @@ This 13.3-inch e-ink display features a wide operating temperature range (-15°C
 
 Link: https://www.good-display.com/product/414.html
 
-<img width="1360" height="1160" alt="image" src="https://github.com/user-attachments/assets/a36accb7-38f1-4c2d-96e5-bacf64dfc029" />
+<img alt="image" src="https://github.com/user-attachments/assets/a36accb7-38f1-4c2d-96e5-bacf64dfc029" />
 
 ---
 
@@ -118,6 +118,58 @@ void loop() {
     // Active event loops
 }
 ```
+
+---
+
+## Help command via Serial Monitor
+
+```
+=== E-INK CLASS LIBRARY GRAPHICS TERMINAL ===
+Enter commands in Serial Monitor (terminate with newline):
+
+--- SETTINGS ---
+  help            - Show this help menu
+  mode <0-2>      - Set default update mode:
+                      0: INIT  (Full clearing, blinking, slow)
+                      1: WDU   (Fast black/white update, 1-bit, no blinking)
+                      2: GC16  (Full grayscale 16-level, 4-bit, RECOMMENDED)
+                      * Modes 3-7 are not supported by this screen.
+  endian <0/1>    - Change byte order (0: Little, 1: Big Endian)
+  temp [C]        - Set temperature (no params - read built-in sensor)
+  vcom            - Read current VCOM voltage from PMIC
+  busy            - Read LUT drawing engine busy status (0x1224)
+  info            - Output detailed device information (FW, LUT, size, buffer)
+
+--- GENERAL OPERATIONS ---
+  clear           - Fill buffer with white and fully update the screen
+  init            - Hardware panel initialization cycle (INIT clear)
+  dashboard       - Redraw the test dashboard to buffer and update
+  sleep           - Put display to sleep mode (VCOM off)
+  wakeup          - Wake up display from sleep mode (VCOM on)
+  testmodes       - Run test of all update modes with timing measurement
+
+--- AUTOMATIC TIMER ---
+  timer <0/1> [m] - Enable(1)/Disable(0) auto-timer. Optional [m] sets mode (e.g. 'timer 1 1' for WDU)
+
+--- DRAWING & LOCAL UPDATE (Coordinates and parameters) ---
+  For high quality output use mode 2 (GC16), for fast text - mode 1 (WDU)
+  update <x> <y> <w> <h> <mode>           - Update area from buffer (no memory allocation)
+  rect <x> <y> <w> <h> <col> <fill> <m>   - Draw rectangle and update area
+  circle <cx> <cy> <r> <col> <fill> <m>   - Draw circle and update area
+  text <x> <y> <scale> <col> <bg> <msg>   - Draw text and update area
+  cyrtext <x> <y> <scale> <col> <bg> <tr 0/1> <msg> - Draw beautiful Cyrillic text (CP1251)
+  loadttf <height> <path>                            - Load new TTF font from LittleFS
+  ttftext <x> <y> <color> <bg> <mode> <tr 0/1> <msg> - Draw anti-aliased TTF text
+  filetext <x> <y> <color> <bg> <mode> <tr 0/1> <filePath> - Render text from file using TTF
+  fileimg <x> <y> <w> <h> <bpp 4/8> <mode> <filePath>      - Render image from .bin file (4 or 8 bpp)
+=============================================================================
+```
+
+---
+
+## Test Code Output (Dashbord)
+
+<img alt="image" src="./result/demo_result.jpg" />
 
 ---
 

@@ -1,7 +1,7 @@
 // ============================================================
-//  ESP32S3_TEST — Інтерактивна графічна консоль E-Ink
-//  Плата: ESP32S3 Dev Module + DEJA-TC103 + GDEP133UT3 (1600×1200)
-//  PSRAM: OPI PSRAM (ОБОВ'ЯЗКОВО УВІМКНУТИ В ARDUINO IDE)
+//  ESP32S3_TEST — Interactive E-Ink Graphic Console
+//  Board: ESP32S3 Dev Module + DEJA-TC103 + GDEP133UT3 (1600×1200)
+//  PSRAM: OPI PSRAM (MUST ENABLE IN ARDUINO IDE)
 // ============================================================
 
 #include <Arduino.h>
@@ -9,74 +9,77 @@
 #include "IT8951.h"
 #include "image_data.h"
 
-// Значення VCOM (наприклад, 2330 для -2.33V)
+// VCOM value (e.g., 2330 for -2.33V)
 #define VCOM_VALUE      2330
 
-// Створюємо глобальний об'єкт дисплея
+// Create global display object
 IT8951Class display;
 
-static uint8_t  g_endianType = 1;      // 1 = Big Endian (Рекомендовано)
-static uint16_t g_defaultMode = UPDATE_MODE_GC16; // Стандартний режим оновлення
+static uint8_t  g_endianType = 1;      // 1 = Big Endian (Recommended)
+static uint16_t g_defaultMode = UPDATE_MODE_GC16; // Standard update mode
 
-// Стан автотаймера
+// Auto-timer state
 static bool autoPartialUpdate = false;
 static uint32_t lastPartialTime = 0;
 static uint32_t uptimeSeconds = 0;
-static uint16_t timerRefreshMode = UPDATE_MODE_DU; // Режим оновлення таймера
+static uint16_t timerRefreshMode = UPDATE_MODE_DU; // Timer update mode
+static String g_loadedFontName = "None";
 
-// ── Друк довідки в Serial ──────────────────────────────────
+// ── Printing help in Serial ──────────────────────────────────
 void printHelp() {
     Serial.println("\n=== E-INK CLASS LIBRARY GRAPHICS TERMINAL ===");
-    Serial.println("Вводьте команди в Serial Monitor (завершуйте символом нового рядка):");
-    Serial.println("\n--- НАЛАШТУВАННЯ ---");
-    Serial.println("  help            - Показати це меню довідки");
-    Serial.println("  mode <0-2>      - Встановити стандартний режим оновлення:");
-    Serial.println("                      0: INIT  (Повне очищення, блимає, повільно)");
-    Serial.println("                      1: WDU   (Швидке ч/б оновлення, 1-bit, без блимання)");
-    Serial.println("                      2: GC16  (Повноцінне сіре 16-рівнів, 4-bit, РЕКОМЕНДОВАНО)");
-    Serial.println("                      * Режими 3-7 не підтримуються даним екраном.");
-    Serial.println("  endian <0/1>    - Зміна порядку байт (0: Little, 1: Big Endian)");
-    Serial.println("  temp [C]        - Задати температуру (без параметрів - зчитати вбудований термодатчик)");
-    Serial.println("  vcom            - Зчитати поточне значення напруги VCOM з PMIC");
-    Serial.println("  busy            - Зчитати статус активності рушія малювання LUT (0x1224)");
-    Serial.println("  info            - Вивести детальну інформацію про пристрій (FW, LUT, розміри, буфер)");
-    Serial.println("\n--- ЗАГАЛЬНІ ОПЕРАЦІЇ ---");
-    Serial.println("  clear           - Залити буфер білим та оновити екран повністю");
-    Serial.println("  init            - Апаратний цикл ініціалізації панелі (INIT clear)");
-    Serial.println("  dashboard       - Перемалювати тестовий дашборд у буфер та оновити");
-    Serial.println("  sleep           - Перевести дисплей у режим сну (з вимкненням VCOM)");
-    Serial.println("  wakeup          - Пробудити дисплей зі сну (з увімкненням VCOM)");
-    Serial.println("  testmodes       - Запустити тест всіх режимів оновлення з виміром часу");
-    Serial.println("\n--- АВТОМАТИЧНИЙ ТАЙМЕР ---");
-    Serial.println("  timer <0/1> [m] - Увімкнути(1)/Вимкнути(0) автотаймер. Опціонально [m] задає режим (наприклад: 'timer 1 1' для WDU)");
-    Serial.println("\n--- МАЛЮВАННЯ ТА ЛОКАЛЬНЕ ОНОВЛЕННЯ (Координати та параметри) ---");
-    Serial.println("  Для якісного виводу використовуйте режим 2 (GC16), для швидкого тексту - 1 (WDU)");
-    Serial.println("  update <x> <y> <w> <h> <mode>           - Оновити область з буфера (без виділення пам'яті)");
-    Serial.println("  rect <x> <y> <w> <h> <col> <fill> <m>   - Намалювати прямокутник та оновити область");
-    Serial.println("  circle <cx> <cy> <r> <col> <fill> <m>   - Намалювати коло та оновити область");
-    Serial.println("  text <x> <y> <scale> <col> <bg> <msg>   - Намалювати текст та оновити область");
-    Serial.println("  cyrtext <x> <y> <scale> <col> <bg> <tr 0/1> <msg> - Намалювати красиву кирилицю (CP1251)");
-    Serial.println("  loadttf <height> <path>                            - Завантажити новий TTF шрифт з LittleFS");
-    Serial.println("  ttftext <x> <y> <color> <bg> <mode> <tr 0/1> <msg> - Намалювати текст шрифтом TTF з згладжуванням");
+    Serial.println("Enter commands in Serial Monitor (terminate with newline):");
+    Serial.println("\n--- SETTINGS ---");
+    Serial.println("  help            - Show this help menu");
+    Serial.println("  mode <0-2>      - Set default update mode:");
+    Serial.println("                      0: INIT  (Full clearing, blinking, slow)");
+    Serial.println("                      1: WDU   (Fast black/white update, 1-bit, no blinking)");
+    Serial.println("                      2: GC16  (Full grayscale 16-level, 4-bit, RECOMMENDED)");
+    Serial.println("                      * Modes 3-7 are not supported by this screen.");
+    Serial.println("  endian <0/1>    - Change byte order (0: Little, 1: Big Endian)");
+    Serial.println("  temp [C]        - Set temperature (no params - read built-in sensor)");
+    Serial.println("  vcom            - Read current VCOM voltage from PMIC");
+    Serial.println("  busy            - Read LUT drawing engine busy status (0x1224)");
+    Serial.println("  info            - Output detailed device information (FW, LUT, size, buffer)");
+    Serial.println("\n--- GENERAL OPERATIONS ---");
+    Serial.println("  clear           - Fill buffer with white and fully update the screen");
+    Serial.println("  init            - Hardware panel initialization cycle (INIT clear)");
+    Serial.println("  dashboard       - Redraw the test dashboard to buffer and update");
+    Serial.println("  sleep           - Put display to sleep mode (VCOM off)");
+    Serial.println("  wakeup          - Wake up display from sleep mode (VCOM on)");
+    Serial.println("  testmodes       - Run test of all update modes with timing measurement");
+    Serial.println("\n--- AUTOMATIC TIMER ---");
+    Serial.println("  timer <0/1> [m] - Enable(1)/Disable(0) auto-timer. Optional [m] sets mode (e.g. 'timer 1 1' for WDU)");
+    Serial.println("\n--- DRAWING & LOCAL UPDATE (Coordinates and parameters) ---");
+    Serial.println("  For high quality output use mode 2 (GC16), for fast text - mode 1 (WDU)");
+    Serial.println("  update <x> <y> <w> <h> <mode>           - Update area from buffer (no memory allocation)");
+    Serial.println("  rect <x> <y> <w> <h> <col> <fill> <m>   - Draw rectangle and update area");
+    Serial.println("  circle <cx> <cy> <r> <col> <fill> <m>   - Draw circle and update area");
+    Serial.println("  text <x> <y> <scale> <col> <bg> <msg>   - Draw text and update area");
+    Serial.println("  cyrtext <x> <y> <scale> <col> <bg> <tr 0/1> <msg> - Draw beautiful Cyrillic text (CP1251)");
+    Serial.println("  loadttf <height> <path>                            - Load new TTF font from LittleFS");
+    Serial.println("  ttftext <x> <y> <color> <bg> <mode> <tr 0/1> <msg> - Draw anti-aliased TTF text");
+    Serial.println("  filetext <x> <y> <color> <bg> <mode> <tr 0/1> <filePath> - Render text from file using TTF");
+    Serial.println("  fileimg <x> <y> <w> <h> <bpp 4/8> <mode> <filePath>      - Render image from .bin file (4 or 8 bpp)");
     Serial.println("=============================================================================");
 }
 
-// ── Малювання тестового дашборду ──────────────────────────
+// ── Drawing the test dashboard ──────────────────────────
 void drawDashboard() {
     Serial.println("[TEST] Rendering dashboard in PSRAM canvas...");
     
-    // 1. Очистити локальний canvas у PSRAM (без виводу на екран)
+    // 1. Clear local canvas in PSRAM (without outputting to screen)
     display.fill(0xFF);
     
-    // 2. Верхній заголовок (Banner)
+    // 2. Top header (Banner)
     display.drawRect(0, 0, display.getWidth(), 60, 0x20, true); 
     if (display.getTTFHeight() > 0) {
-        display.drawTTFText(20, 42, "IT8951 ДИНАМІЧНИЙ TTF ШРИФТ З LITTLEFS - 1600x1200", 0xFF, 0x20, true);
+        display.drawTTFText(20, 42, "IT8951 DYNAMIC TTF FONT FROM LITTLEFS - 1600x1200", 0xFF, 0x20, true);
     } else {
-        display.drawCyrillicText(20, 42, "IT8951 ТЕСТ КИРИЛИЦІ (Ірпінь, Київ, Україна) - 1600x1200", 0xFF, 0x20, 1, true);
+        display.drawCyrillicText(20, 42, "IT8951 CYRILLIC TEST (Irpin, Kyiv, Ukraine) - 1600x1200", 0xFF, 0x20, 1, true);
     }
     
-    // 3. Інформаційна панель
+    // 3. Information panel
     display.drawRect(10, 70, display.getWidth() - 20, 45, 0xF0, true);
     display.drawRect(10, 70, display.getWidth() - 20, 45, 0x00, false);
     char infoText[150];
@@ -84,7 +87,7 @@ void drawDashboard() {
             display.getWidth(), display.getHeight(), VCOM_VALUE, g_defaultMode, (g_endianType == 1) ? "Big Endian" : "Little Endian", g_endianType, timerRefreshMode);
     display.drawText(20, 85, infoText, 0x00, 0xF0, 1);
     
-    // 4. Ліва область: Тест геометрії та лінійності (Grid & Circles)
+    // 4. Left area: Geometry and linearity test (Grid & Circles)
     uint16_t gridX = 40;
     uint16_t gridY = 140;
     uint16_t gridW = 500;
@@ -110,7 +113,7 @@ void drawDashboard() {
     display.drawCircle(cx, cy, 60, 0xC0, false);
     display.drawCircle(cx, cy, 10, 0x00, true);
     
-    // 5. Середня область: Тест шрифтів та градієнтів контрасту
+    // 5. Middle area: Test of fonts and contrast gradients
     uint16_t txtX = 580;
     uint16_t txtY = 140;
     display.drawText(txtX, txtY - 25, "TYPOGRAPHY & GRAYSCALE LEVELS", 0x00, 0xFF, 1);
@@ -119,10 +122,17 @@ void drawDashboard() {
     display.drawText(txtX, txtY + 25, "Scale 2: DEJA-TC103 Driver", 0x00, 0xFF, 2);
     display.drawText(txtX, txtY + 65, "Scale 3: ESP32-S3 SPI", 0x00, 0xFF, 3);
     
-    display.drawCyrillicText(txtX, txtY + 145, "Демонстрація контрасту (шрифт IrpinType 32px):", 0x00, 0xFF, 1, true);
-    display.drawCyrillicText(txtX, txtY + 175, "  Колір 0x00 (Чорний)", 0x00, 0xFF, 1, true);
-    display.drawCyrillicText(txtX, txtY + 205, "  Колір 0x80 (Сірий)", 0x80, 0xFF, 1, true);
-    display.drawCyrillicText(txtX, txtY + 235, "  Колір 0xC0 (Світло-сірий)", 0xC0, 0xFF, 1, true);
+    if (display.getTTFHeight() > 0) {
+        display.drawTTFText(txtX, txtY + 145, "Contrast demonstration (IrpinType font):", 0x00, 0xFF, true);
+        display.drawTTFText(txtX, txtY + 175, "  Color 0x00 (Black)", 0x00, 0xFF, true);
+        display.drawTTFText(txtX, txtY + 205, "  Color 0x80 (Gray)", 0x80, 0xFF, true);
+        display.drawTTFText(txtX, txtY + 235, "  Color 0xC0 (Light-gray)", 0xC0, 0xFF, true);
+    } else {
+        display.drawCyrillicText(txtX, txtY + 145, "Contrast demonstration (built-in font 32px):", 0x00, 0xFF, 1, true);
+        display.drawCyrillicText(txtX, txtY + 175, "  Color 0x00 (Black)", 0x00, 0xFF, 1, true);
+        display.drawCyrillicText(txtX, txtY + 205, "  Color 0x80 (Gray)", 0x80, 0xFF, 1, true);
+        display.drawCyrillicText(txtX, txtY + 235, "  Color 0xC0 (Light-gray)", 0xC0, 0xFF, 1, true);
+    }
     
     display.drawRect(txtX, txtY + 245, 450, 40, 0x00, false);
     for (uint16_t i = 0; i < 448; i++) {
@@ -132,14 +142,14 @@ void drawDashboard() {
         }
     }
     
-    // 6. Нижня середня область: Вбудоване растрове зображення сови
+    // 6. Lower middle area: Embedded raster owl image
     uint16_t imgX = 580;
     uint16_t imgY = 460;
     display.drawText(imgX, imgY - 25, "REAL RASTER IMAGE (256x256 Grayscale)", 0x00, 0xFF, 1);
     display.drawRect(imgX - 2, imgY - 2, owl_width + 4, owl_height + 4, 0x00, false);
     display.drawImage(imgX, imgY, owl_width, owl_height, owl_image_data);
     
-    // 7. Права область: Часткове оновлення
+    // 7. Right area: Partial update
     uint16_t partX = 1100;
     uint16_t partY = 140;
     uint16_t partW = 460;
@@ -162,13 +172,49 @@ void drawDashboard() {
     sprintf(timeStr, "%05d SEC", uptimeSeconds);
     display.drawText(partX + 40, partY + 195, timeStr, 0x00, 0xEE, 3);
     
-    // Інструкція для Serial консолі внизу
+    // Serial console instructions at the bottom
     uint16_t manualY = 700;
     display.drawText(40, manualY, "SERIAL MONITOR TERMINAL ACTIVE", 0x00, 0xFF, 2);
-    display.drawText(40, manualY + 40, "Введіть 'help' у Serial Monitor для перегляду списку команд.", 0x00, 0xFF, 1);
+    display.drawText(40, manualY + 40, "Enter 'help' in Serial Monitor to view the command list.", 0x00, 0xFF, 1);
+
+    // Alphabet Rendering Test (with Font Selection)
+    uint16_t alphY = 780;
+    display.drawRect(30, alphY - 10, display.getWidth() - 60, 360, 0x00, false);
+    display.drawRect(30, alphY - 10, display.getWidth() - 60, 45, 0xF0, true);
+    display.drawRect(30, alphY - 10, display.getWidth() - 60, 45, 0x00, false);
+    
+    display.drawText(40, alphY + 5, "ALPHABET RENDERING TEST (WITH FONT SELECTION)", 0x00, 0xF0, 1);
+    
+    char fontInfo[128];
+    if (display.getTTFHeight() > 0) {
+        sprintf(fontInfo, "Selected Font: TTF Font [%s] (Height: %d px)", g_loadedFontName.c_str(), display.getTTFHeight());
+    } else {
+        sprintf(fontInfo, "Selected Font: Built-in Cyrillic Font [irpinFont] (Size: 32px)");
+    }
+    display.drawText(40, alphY + 50, fontInfo, 0x00, 0xFF, 1);
+    
+    const char* enUpper = "English (Upper): A B C D E F G H I J K L M N O P Q R S T U V W X Y Z";
+    const char* enLower = "English (Lower): a b c d e f g h i j k l m n o p q r s t u v w x y z";
+    const char* uaUpper = "Ukrainian (Upper): А Б В Г Ґ Д Е Є Ж З И І Ї Й К Л М Н О П Р С Т У Ф Х Ц Ч Ш Щ Ь Ю Я";
+    const char* uaLower = "Ukrainian (Lower): а б в г ґ д е є ж з и і ї й к л м н о п р с т у ф х ц ч ш щ ь ю я";
+    const char* specChars = "Symbols: ! @ # $ % ^ & * ( ) _ + - = { } [ ] : ; \" ' < > , . ? / \\ | ~";
+    
+    if (display.getTTFHeight() > 0) {
+        display.drawTTFText(40, alphY + 95, enUpper, 0x00, 0xFF, true);
+        display.drawTTFText(40, alphY + 135, enLower, 0x00, 0xFF, true);
+        display.drawTTFText(40, alphY + 185, uaUpper, 0x00, 0xFF, true);
+        display.drawTTFText(40, alphY + 225, uaLower, 0x00, 0xFF, true);
+        display.drawTTFText(40, alphY + 275, specChars, 0x00, 0xFF, true);
+    } else {
+        display.drawCyrillicText(40, alphY + 95, enUpper, 0x00, 0xFF, 1, true);
+        display.drawCyrillicText(40, alphY + 135, enLower, 0x00, 0xFF, 1, true);
+        display.drawCyrillicText(40, alphY + 185, uaUpper, 0x00, 0xFF, 1, true);
+        display.drawCyrillicText(40, alphY + 225, uaLower, 0x00, 0xFF, 1, true);
+        display.drawCyrillicText(40, alphY + 275, specChars, 0x00, 0xFF, 1, true);
+    }
 }
 
-// ── Оновлення таймера ────────────────────────────────────────
+// ── Timer Update ────────────────────────────────────────
 void drawAndRefreshCounter() {
     uint16_t boxX = 1100 + 40;
     uint16_t boxY = 140 + 195;
@@ -182,21 +228,21 @@ void drawAndRefreshCounter() {
     sprintf(timeStr, "%05d SEC", uptimeSeconds);
     display.drawText(boxX, boxY, timeStr, 0x00, 0xEE, 3);
     
-    // Вибіркове оновлення (завантажує тільки змінену область прямо з PSRAM та оновлює її)
+    // Selective update (loads only the modified area directly from PSRAM and updates it)
     display.updateArea(boxX, boxY, boxW, boxH, timerRefreshMode);
 }
 
-// ── Тестування всіх режимів оновлення (Waveform Modes 0-7) ───
+// ── Testing all update modes (Waveform Modes 0-7) ───
 void runModesTest() {
     Serial.println("\n==============================================");
-    Serial.println(" Запуск діагностичного тесту режимів оновлення...");
+    Serial.println(" Running diagnostic update modes test...");
     Serial.println("==============================================");
 
-    // 1. Повне очищення екрана перед тестом
+    // 1. Full screen clearing before the test
     display.clearScreen();
     delay(500);
 
-    // Очищаємо локальний canvas у PSRAM білим кольором
+    // Clear local canvas in PSRAM with white color
     display.fill(0xFF);
 
     const char* modeNames[8] = {
@@ -213,8 +259,8 @@ void runModesTest() {
     uint32_t timings[8] = {0};
     bool success[8] = {false};
 
-    // Розміри сітки 4x2 для 1600x1200 екрану
-    // Кожен осередк (cell) має розмір 400x600
+    // 4x2 grid size for 1600x1200 screen
+    // Each cell has size 400x600
     uint16_t cellW = 400;
     uint16_t cellH = 600;
 
@@ -224,21 +270,21 @@ void runModesTest() {
         uint16_t cellX = col * cellW;
         uint16_t cellY = row * cellH;
 
-        Serial.printf("[TEST] Малювання осередку для %s на (%d, %d)...\n", modeNames[m], cellX, cellY);
+        Serial.printf("[TEST] Drawing cell for %s at (%d, %d)...\n", modeNames[m], cellX, cellY);
 
-        // Малюємо рамку осередку
+        // Draw cell border
         display.drawRect(cellX, cellY, cellW, cellH, 0x00, false);
 
-        // Шапка осередку (заголовок режиму)
+        // Cell header (mode title)
         display.drawRect(cellX + 2, cellY + 2, cellW - 4, 38, 0xE0, true);
         display.drawText(cellX + 10, cellY + 12, modeNames[m], 0x00, 0xE0, 1);
 
-        // Малюємо зображення сови по центру
+        // Draw owl image in the center
         uint16_t owlX = cellX + (cellW - owl_width) / 2; // 400 - 256 = 144 / 2 = 72
         uint16_t owlY = cellY + 60;
         display.drawImage(owlX, owlY, owl_width, owl_height, owl_image_data);
 
-        // Плавний градієнт
+        // Smooth gradient
         uint16_t gradX = cellX + 20;
         uint16_t gradY = cellY + 345;
         uint16_t gradW = cellW - 40; // 360
@@ -251,10 +297,10 @@ void runModesTest() {
             }
         }
 
-        // Мітки під градієнтом
+        // Labels under the gradient
         display.drawText(cellX + 20, cellY + 390, "0x00 (Black) -> 0xFF (White)", 0x00, 0xFF, 1);
 
-        // Чотири квадрати контрасту
+        // Four contrast squares
         uint16_t sqY = cellY + 430;
         display.drawText(cellX + 20, sqY, "Contrast Levels:", 0x00, 0xFF, 1);
 
@@ -269,13 +315,13 @@ void runModesTest() {
         display.drawRect(cellX + 300, boxY, 60, 40, 0x00, false);
         display.drawRect(cellX + 301, boxY + 1, 58, 38, 0xFF, true);
 
-        // Написи під квадратами
+        // Labels under the squares
         display.drawText(cellX + 45, cellY + 510, "00", 0x00, 0xFF, 1);
         display.drawText(cellX + 135, cellY + 510, "55", 0x00, 0xFF, 1);
         display.drawText(cellX + 225, cellY + 510, "AA", 0x00, 0xFF, 1);
         display.drawText(cellX + 315, cellY + 510, "FF", 0x00, 0xFF, 1);
 
-        // Вимірюємо час оновлення цієї області за допомогою обраного режиму
+        // Measure the update time of this area using the selected mode
         uint32_t tStart = millis();
         display.updateArea(cellX, cellY, cellW, cellH, m);
         uint32_t tEnd = millis();
@@ -283,18 +329,18 @@ void runModesTest() {
         timings[m] = tEnd - tStart;
         success[m] = (timings[m] < 9900);
 
-        Serial.printf("[TEST] Оновлення осередку %s завершено за %lu ms (Статус: %s)\n", 
+        Serial.printf("[TEST] Cell %s update completed in %lu ms (Status: %s)\n", 
                       modeNames[m], timings[m], success[m] ? "OK" : "TIMEOUT/WARN");
 
-        // Коротка пауза між оновленнями
+        // Short pause between updates
         delay(500);
     }
 
-    // 2. Друк результатів у вигляді красивої ASCII таблиці
+    // 2. Print results in a beautiful ASCII table
     Serial.println("\n=======================================================");
-    Serial.println("  РЕЗУЛЬТАТИ ТЕСТУВАННЯ РЕЖИМІВ ОНОВЛЕННЯ (WAVEFORM)");
+    Serial.println("  UPDATE MODES (WAVEFORM) TEST RESULTS");
     Serial.println("=======================================================");
-    Serial.println(" Режим | Назва Режиму   | Час оновлення | Статус");
+    Serial.println(" Mode  | Mode Name      | Update Time   | Status");
     Serial.println("-------|----------------|---------------|--------------");
     for (int m = 0; m < 8; m++) {
         char timeBuf[16];
@@ -316,8 +362,8 @@ void runModesTest() {
                       success[m] ? "OK" : "TIMEOUT / NOT SUPPORTED");
     }
     Serial.println("=======================================================");
-    Serial.println("Примітка: Для DU (1) та A2 (6) зображення має бути двоколірним.");
-    Serial.println("Для GC16 (2), GL16 (3), GLD16 (5) мають бути плавні сірі градієнти.\n");
+    Serial.println("Note: For DU (1) and A2 (6), the image must be two-color (black/white).");
+    Serial.println("For GC16 (2), GL16 (3), and GLD16 (5), there should be smooth gray gradients.\n");
 }
 
 // ── setup() ──────────────────────────────────────────────────
@@ -328,7 +374,7 @@ void setup() {
     Serial.println(" IT8951 Library Test & Verification System");
     Serial.println("==============================================");
 
-    // Ініціалізація об'єкта бібліотеки (виділення PSRAM та запуск SPI відбувається всередині)
+    // Library object initialization (PSRAM allocation and SPI startup happen internally)
     if (!display.begin(VCOM_VALUE)) {
         Serial.println("[ERROR] Failed to initialize IT8951 display library!");
         while (1) { delay(1000); }
@@ -336,24 +382,26 @@ void setup() {
     
     display.setEndianness(g_endianType);
 
-    // Ініціалізація LittleFS для завантаження TTF шрифтів
+    // LittleFS initialization for loading TTF fonts
     if (!LittleFS.begin(true)) {
         Serial.println("[LittleFS] Error mounting LittleFS! Auto-formatting enabled.");
     } else {
         Serial.println("[LittleFS] Mount successful.");
-        // Пробуємо завантажити стандартний TTF
-        if (display.loadTTF(LittleFS, "/IrpinType-Regular.ttf", 10)) {
-            Serial.println("[TTF] Loaded IrpinType-Regular.ttf at height 10px successfully.");
+        // Try loading standard TTF
+        if (display.loadTTF(LittleFS, "/IrpinType-Regular.ttf", 24)) {
+            g_loadedFontName = "IrpinType-Regular.ttf";
+            Serial.println("[TTF] Loaded IrpinType-Regular.ttf at height 24px successfully.");
         } else {
+            g_loadedFontName = "None";
             Serial.println("[TTF] Standard font IrpinType-Regular.ttf not found in LittleFS root.");
         }
     }
 
-    // Перше повне очищення екрана
+    // First full screen clearing
     display.clearScreen();
     delay(500);
 
-    // Малюємо та виводимо початковий дашборд
+    // Draw and output initial dashboard
     drawDashboard();
     display.display(g_defaultMode);
     
@@ -362,7 +410,7 @@ void setup() {
 
 // ── loop() ───────────────────────────────────────────────────
 void loop() {
-    // Обробка таймера
+    // Timer handling
     if (autoPartialUpdate) {
         uint32_t now = millis();
         if (now - lastPartialTime >= 1000) {
@@ -372,7 +420,7 @@ void loop() {
         }
     }
 
-    // Інтерактивна консоль
+    // Interactive console
     if (Serial.available()) {
         String line = Serial.readStringUntil('\n');
         line.trim();
@@ -658,10 +706,11 @@ void loop() {
                 display.drawCyrillicText(x, y, remain.c_str(), color, bg, scale, transparent);
                 
                 uint16_t w = display.getCyrillicTextWidth(remain.c_str(), scale);
-                uint16_t h = 32 * scale; // 32px font size
-                uint16_t yStart = y - (24 * scale); // ascent offset
-                
-                display.updateArea(x, yStart, w, h, g_defaultMode);
+                int hVal = 32 * scale; // 32px font size
+                int yStart = y - (24 * scale); // ascent offset
+                if (yStart < 0) { hVal += yStart; yStart = 0; }
+                if (hVal < 1) hVal = 1;
+                display.updateArea(x, yStart, w, hVal, g_defaultMode);
                 Serial.printf("[DRAW] Cyrillic text '%s' drawn and refreshed.\n", remain.c_str());
             } else {
                 Serial.println("[ERR] Usage: cyrtext <x> <y> <scale> <color> <bg> <transparent 0/1> <message>");
@@ -676,8 +725,12 @@ void loop() {
                 path.trim();
                 
                 if (display.loadTTF(LittleFS, path.c_str(), height)) {
+                    int lastSlash = path.lastIndexOf('/');
+                    if (lastSlash == -1) lastSlash = path.lastIndexOf('\\');
+                    g_loadedFontName = (lastSlash == -1) ? path : path.substring(lastSlash + 1);
                     Serial.printf("[TTF] Loaded font %s at height %d\n", path.c_str(), height);
                 } else {
+                    g_loadedFontName = "None";
                     Serial.printf("[TTF] Failed to load font %s\n", path.c_str());
                 }
             } else {
@@ -716,14 +769,166 @@ void loop() {
                 display.drawTTFText(x, y, remain.c_str(), color, bg, transparent);
                 
                 uint16_t w = display.getTTFTextWidth(remain.c_str());
-                uint16_t h = display.getTTFHeight();
+                int hVal = display.getTTFHeight();
                 // Estimate baseline top yStart
-                uint16_t yStart = y - (h * 3 / 4); // estimate ascent (75% of height)
-                
-                display.updateArea(x, yStart, w, h, mode);
+                int yStart = y - (hVal * 3 / 4); // estimate ascent (75% of height)
+                if (yStart < 0) { hVal += yStart; yStart = 0; }
+                if (hVal < 1) hVal = 1;
+                display.updateArea(x, yStart, w, hVal, mode);
                 Serial.printf("[DRAW] TTF text '%s' drawn and refreshed.\n", remain.c_str());
             } else {
                 Serial.println("[ERR] Usage: ttftext <x> <y> <color> <bg> <mode> <tr 0/1> <message>");
+            }
+        }
+        // filetext <x> <y> <color> <bg> <mode> <tr 0/1> <filePath>
+        else if (cmd == "filetext") {
+            int vals[5];
+            int parsed = 0;
+            String remain = args;
+            for (int i = 0; i < 5; i++) {
+                int sp = remain.indexOf(' ');
+                if (sp != -1) {
+                    vals[i] = remain.substring(0, sp).toInt();
+                    remain = remain.substring(sp + 1);
+                    parsed++;
+                }
+            }
+            
+            // Get transparent parameter
+            int sp = remain.indexOf(' ');
+            bool transparent = true;
+            String filePath = "";
+            if (sp != -1) {
+                transparent = (remain.substring(0, sp).toInt() != 0);
+                filePath = remain.substring(sp + 1);
+                filePath.trim();
+            }
+            
+            if (parsed == 5 && filePath.length() > 0) {
+                int x = vals[0];
+                int y = vals[1];
+                int color = vals[2];
+                int bg = vals[3];
+                int mode = vals[4];
+                
+                File file = LittleFS.open(filePath, "r");
+                if (!file) {
+                    Serial.printf("[ERR] Failed to open file: %s\n", filePath.c_str());
+                } else {
+                    String content = file.readString();
+                    file.close();
+                    
+                    display.drawTTFText(x, y, content.c_str(), color, bg, transparent);
+                    
+                    int lines = 1;
+                    for (int i = 0; i < content.length(); i++) {
+                        if (content[i] == '\n') lines++;
+                    }
+                    uint16_t w = display.getTTFTextWidth(content.c_str());
+                    int hVal = display.getTTFHeight() * lines;
+                    int yStart = y - (display.getTTFHeight() * 3 / 4); // estimate ascent (75% of height)
+                    if (yStart < 0) { hVal += yStart; yStart = 0; }
+                    if (hVal < 1) hVal = 1;
+                    display.updateArea(x, yStart, w, hVal, mode);
+                    Serial.printf("[DRAW] Text from file '%s' drawn and refreshed.\n", filePath.c_str());
+                }
+            } else {
+                Serial.println("[ERR] Usage: filetext <x> <y> <color> <bg> <mode> <tr 0/1> <filePath>");
+            }
+        }
+        // fileimg <x> <y> <w> <h> <bpp 4/8> <mode> <filePath>
+        else if (cmd == "fileimg") {
+            int vals[6];
+            int parsed = 0;
+            String remain = args;
+            for (int i = 0; i < 6; i++) {
+                int sp = remain.indexOf(' ');
+                if (sp != -1) {
+                    vals[i] = remain.substring(0, sp).toInt();
+                    remain = remain.substring(sp + 1);
+                    parsed++;
+                }
+            }
+            remain.trim();
+            String filePath = remain;
+            
+            if (parsed == 6 && filePath.length() > 0) {
+                int x = vals[0];
+                int y = vals[1];
+                int w = vals[2];
+                int h = vals[3];
+                int bpp = vals[4];
+                int mode = vals[5];
+                
+                if (bpp != 4 && bpp != 8) {
+                    Serial.println("[ERR] Supported BPP values are 4 or 8.");
+                } else {
+                    File file = LittleFS.open(filePath, "r");
+                    if (!file) {
+                        Serial.printf("[ERR] Failed to open file: %s\n", filePath.c_str());
+                    } else {
+                        size_t expectedSize = 0;
+                        if (bpp == 8) {
+                            expectedSize = (size_t)w * h;
+                        } else { // 4bpp
+                            expectedSize = ((size_t)w * h + 1) / 2;
+                        }
+                        
+                        size_t fileSize = file.size();
+                        if (fileSize < expectedSize) {
+                            Serial.printf("[WARNING] File size (%d bytes) is less than expected image size (%d bytes)\n", fileSize, expectedSize);
+                        }
+                        
+                        Serial.printf("[DRAW] Loading image %dx%d (%d BPP) from %s...\n", w, h, bpp, filePath.c_str());
+                        
+                        if (bpp == 8) {
+                            uint8_t* rowBuf = (uint8_t*)malloc(w);
+                            if (!rowBuf) {
+                                Serial.println("[ERR] Out of memory for row buffer");
+                                file.close();
+                            } else {
+                                for (int r = 0; r < h; r++) {
+                                    int readBytes = file.read(rowBuf, w);
+                                    if (readBytes <= 0) break;
+                                    for (int c = 0; c < readBytes; c++) {
+                                        display.drawPixel(x + c, y + r, rowBuf[c]);
+                                    }
+                                }
+                                free(rowBuf);
+                            }
+                        } else { // 4bpp
+                            int rowBytes = (w + 1) / 2;
+                            uint8_t* rowBuf = (uint8_t*)malloc(rowBytes);
+                            if (!rowBuf) {
+                                Serial.println("[ERR] Out of memory for row buffer");
+                                file.close();
+                            } else {
+                                for (int r = 0; r < h; r++) {
+                                    int readBytes = file.read(rowBuf, rowBytes);
+                                    if (readBytes <= 0) break;
+                                    for (int c = 0; c < w; c++) {
+                                        int byteIdx = c / 2;
+                                        if (byteIdx >= readBytes) break;
+                                        uint8_t color;
+                                        if (c % 2 == 0) {
+                                            color = (rowBuf[byteIdx] >> 4) << 4;
+                                        } else {
+                                            color = (rowBuf[byteIdx] & 0x0F) << 4;
+                                        }
+                                        display.drawPixel(x + c, y + r, color);
+                                    }
+                                }
+                                free(rowBuf);
+                            }
+                        }
+                        
+                        file.close();
+                        display.updateArea(x, y, w, h, mode);
+                        Serial.println("[DRAW] Image loaded and refreshed.");
+                    }
+                }
+            } else {
+                Serial.println("[ERR] Usage: fileimg <x> <y> <w> <h> <bpp 4/8> <mode> <filePath>");
             }
         }
         else {

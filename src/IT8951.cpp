@@ -1,6 +1,6 @@
 // ============================================================
-//  IT8951 — Реалізація бібліотеки
-//  Плата: ESP32-S3 + DEJA-TC103 + GDEP133UT3 (1600×1200)
+//  IT8951 — Library Implementation
+//  Board: ESP32-S3 + DEJA-TC103 + GDEP133UT3 (1600×1200)
 // ============================================================
 
 #include "IT8951.h"
@@ -11,7 +11,7 @@
 #include "stb_truetype.h"
 
 
-// Перетворює UTF-8 символ (до 2 байт) у кодування Windows-1251
+// Converts UTF-8 character (up to 2 bytes) to Windows-1251 encoding
 static uint8_t utf8_to_cp1251(const char* &utf8_str) {
     uint8_t c = (uint8_t)*utf8_str++;
     
@@ -46,15 +46,15 @@ static uint8_t utf8_to_cp1251(const char* &utf8_str) {
 }
 
 
-// Обмеження ESP32 SPI DMA: max ~4092 байт за один transferBytes
+// ESP32 SPI DMA limit: max ~4092 bytes per single transferBytes
 #define SPI_DMA_MAX  4092
-static uint8_t _dmaBuf[SPI_DMA_MAX] __attribute__((aligned(4))); // SRAM буфер для DMA
+static uint8_t _dmaBuf[SPI_DMA_MAX] __attribute__((aligned(4))); // SRAM buffer for DMA
 
-// Конструктор
+// Constructor
 IT8951Class::IT8951Class() : 
     _imgBuf(nullptr), 
     _imgBufAddr(0), 
-    _endianType(1), // Big Endian за замовчуванням
+    _endianType(1), // Big Endian by default
     _vcom(2330),
     _panelW(1600),
     _panelH(1200),
@@ -67,7 +67,7 @@ IT8951Class::IT8951Class() :
     _fontInfoRaw(nullptr) {
 }
 
-// Деструктор
+// Destructor
 IT8951Class::~IT8951Class() {
     unloadTTF();
     if (_imgBuf) {
@@ -76,7 +76,7 @@ IT8951Class::~IT8951Class() {
     }
 }
 
-// Ініціалізація
+// Initialization
 bool IT8951Class::begin(uint16_t vcom, int8_t sck, int8_t miso, int8_t mosi, int8_t cs, int8_t hrdy, int8_t rst, int8_t pwr) {
     _pinSCK  = sck;
     _pinMISO = miso;
@@ -96,39 +96,39 @@ bool IT8951Class::begin(uint16_t vcom, int8_t sck, int8_t miso, int8_t mosi, int
 
     digitalWrite(_pinCS,  HIGH);
     digitalWrite(_pinRST, HIGH);
-    digitalWrite(_pinPWR, LOW); // Спочатку живлення вимкнено
+    digitalWrite(_pinPWR, LOW); // Power is off initially
 
-    // Виділення пам'яті під 4bpp буфер у PSRAM
+    // Memory allocation for 4bpp buffer in PSRAM
     size_t bufSize = (size_t)_panelW * (_panelH / 2);
     _imgBuf = (uint8_t*)ps_malloc(bufSize);
     if (!_imgBuf) {
         Serial.println("[IT8951] ERROR: PSRAM allocation failed!");
         return false;
     }
-    // Заливаємо білим
+    // Fill with white
     memset(_imgBuf, 0xFF, bufSize);
 
-    // Ініціалізація SPI
+    // SPI Initialization
     SPI.begin(_pinSCK, _pinMISO, _pinMOSI, _pinCS);
     SPI.beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
 
-    // Увімкнути живлення і налаштувати дисплей
+    // Turn on power and configure display
     powerOn();
 
-    // Отримуємо DevInfo
+    // Get DevInfo
     IT8951DevInfo devInfo;
     getDeviceInfo(&devInfo);
     _panelW = devInfo.panelW;
     _panelH = devInfo.panelH;
     
-    // Вимикаємо живлення екрана після повної ініціалізації (буде вмикатись динамічно)
+    // Turn off display power after full initialization (will turn on dynamically)
     powerOff();
 
     Serial.println("[IT8951] Library initialized successfully");
     return true;
 }
 
-// ── Низькорівневі SPI функції ──────────────────────────────
+// ── Low-level SPI functions ──────────────────────────────
 
 void IT8951Class::waitForReady(uint32_t timeoutMs) {
     uint32_t start = millis();
@@ -188,7 +188,7 @@ void IT8951Class::reset() {
     delay(200);
     digitalWrite(_pinRST, HIGH);
     delay(200);
-    waitForReady(2000); // Дати контролеру до 2 секунд на запуск системного ПЗУ
+    waitForReady(2000); // Give the controller up to 2 seconds to launch the system ROM
 }
 
 void IT8951Class::getDeviceInfo(IT8951DevInfo* info) {
@@ -220,23 +220,23 @@ void IT8951Class::setVCOM(uint16_t vcom) {
     Serial.printf("[IT8951] VCOM set to -%d mV\n", vcom);
 }
 
-// ── Живлення ──────────────────────────────────────────────────
+// ── Power ──────────────────────────────────────────────────
 
 void IT8951Class::powerOn() {
     if (_isPowered) return;
     
-    // Вмикаємо лінію живлення (якщо підключена)
+    // Turn on the power line (if connected)
     digitalWrite(_pinPWR, HIGH);
-    delay(50); // Дати живленню стабілізуватися
+    delay(50); // Allow power to stabilize
     
     bool needReset = false;
     
-    // Якщо HRDY низький після подачі живлення, чіп точно не активний/потребує скидання
+    // If HRDY is low after power on, the chip is definitely inactive/needs reset
     if (digitalRead(_pinHRDY) == LOW) {
         needReset = true;
     } else {
-        // HRDY високий, спробуємо розбудити та зчитати тестовий регістр
-        // Використовуємо короткий таймаут 20ms, щоб не зависати якщо чіп мертвий
+        // HRDY is high, try to wake up and read test register
+        // Use a short 20ms timeout to avoid hanging if the chip is unresponsive
         waitForReady(20); 
         writeCmd(IT8951_TCON_SYS_RUN);
         delay(20);
@@ -257,12 +257,12 @@ void IT8951Class::powerOn() {
         writeReg(REG_I80CPCR, 0x0001);
         setVCOM(_vcom);
     } else {
-        // Контролер підключений окремо або зберіг стан у сні. 
-        // Поновлюємо VCOM про всяк випадок (PMIC міг його вимкнути).
+        // The controller is connected separately or preserved state in sleep. 
+        // Restore VCOM just in case (PMIC could have turned it off).
         setVCOM(_vcom);
     }
     
-    // Відновлюємо налаштування температури, якщо вони були задані
+    // Restore temperature settings if they were set
     if (_currentTemp != -99) {
         writeReg(REG_TEMP, (uint16_t)_currentTemp);
         Serial.printf("[IT8951] Restored temperature setting to: %d C\n", _currentTemp);
@@ -292,7 +292,7 @@ void IT8951Class::wakeup() {
     powerOn();
 }
 
-// ── Температура ────────────────────────────────────────────────
+// ── Temperature ────────────────────────────────────────────────
 
 void IT8951Class::setTemperature(int8_t temp) {
     _currentTemp = temp;
@@ -305,7 +305,7 @@ void IT8951Class::setTemperature(int8_t temp) {
 }
 
 uint16_t IT8951Class::getVCOM() {
-    powerOn(); // Забезпечуємо увімкнене живлення
+    powerOn(); // Ensure power is turned on
     writeCmd(0x0039);
     writeData(0x0000); // 0 = read mode
     uint16_t vcomVal = readData();
@@ -313,7 +313,7 @@ uint16_t IT8951Class::getVCOM() {
 }
 
 int8_t IT8951Class::readTemperature() {
-    powerOn(); // Забезпечуємо увімкнене живлення
+    powerOn(); // Ensure power is turned on
     writeCmd(0x00A4);
     writeData(0x0000); // 0 = read option
     uint16_t rawTemp = readData();
@@ -321,20 +321,20 @@ int8_t IT8951Class::readTemperature() {
 }
 
 bool IT8951Class::isEngineBusy() {
-    if (!_isPowered) return false; // Якщо живлення вимкнено, рушій не може бути зайнятий
+    if (!_isPowered) return false; // If power is off, the engine cannot be busy
     return (readReg(0x1224) != 0);
 }
 
-// ── Завантаження пікселів ────────────────────────────────────
+// ── Loading pixels ────────────────────────────────────
 
 void IT8951Class::loadImageStart(IT8951LdImgInfo* imgInfo, IT8951AreaImgInfo* areaInfo) {
-    powerOn(); // Забезпечуємо увімкнене живлення перед роботою
+    powerOn(); // Ensure power is turned on before operation
 
     writeReg(REG_LISAR,  (uint16_t)(_imgBufAddr & 0xFFFF));
     writeReg(REG_LISARH, (uint16_t)(_imgBufAddr >> 16));
 
-    // Зміна 2, 3, 4, 8 BPP на внутрішній код IT8951 (0, 1, 2, 3)
-    uint16_t bppCode = 2; // за замовчуванням 4bpp
+    // Convert 2, 3, 4, 8 BPP to internal IT8951 code (0, 1, 2, 3)
+    uint16_t bppCode = 2; // default is 4bpp
     if (imgInfo->pixelFormat == 2) bppCode = 0;
     else if (imgInfo->pixelFormat == 3) bppCode = 1;
     else if (imgInfo->pixelFormat == 4) bppCode = 2;
@@ -385,14 +385,14 @@ void IT8951Class::loadAreaPixels_4bpp(const uint8_t* canvas, uint16_t x, uint16_
     for (uint16_t r = 0; r < h; r++) {
         uint32_t srcIdx = (uint32_t)(y + r) * row_stride_bytes + (x / 2);
         
-        // Копіюємо один рядок в SRAM DMA буфер
+        // Copy one row to SRAM DMA buffer
         memcpy(_dmaBuf, canvas + srcIdx, w_bytes);
         SPI.transferBytes(_dmaBuf, nullptr, w_bytes);
     }
     csHigh();
 }
 
-// ── Відображення (Refresh) ──────────────────────────────────
+// ── Refresh (Display) ──────────────────────────────────
 
 void IT8951Class::fill(uint8_t color) {
     uint8_t c4 = color >> 4;
@@ -422,7 +422,7 @@ void IT8951Class::clearScreen() {
     static bool whiteReady = false;
     if (!whiteReady) { memset(whiteBuf, 0xFF, SPI_DMA_MAX); whiteReady = true; }
 
-    uint32_t totalBytes = ((uint32_t)_panelW * _panelH) / 2; // ДІЛЕННЯ НА 2 ДЛЯ 4bpp!
+    uint32_t totalBytes = ((uint32_t)_panelW * _panelH) / 2; // DIVISION BY 2 FOR 4bpp!
     waitForReady();
     csLow();
     SPI.transfer16(PREAMBLE_WRITE);
@@ -455,7 +455,7 @@ void IT8951Class::display(uint8_t mode) {
 
     loadImageStart(&imgInfo, &areaInfo);
     
-    uint32_t totalBytes = ((uint32_t)_panelW * _panelH) / 2; // ДІЛЕННЯ НА 2 ДЛЯ 4bpp!
+    uint32_t totalBytes = ((uint32_t)_panelW * _panelH) / 2; // DIVISION BY 2 FOR 4bpp!
     loadBulkPixels(_imgBuf, totalBytes);
     loadImageEnd();
     
@@ -470,8 +470,8 @@ void IT8951Class::displayArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, ui
     if (y + h > _panelH) h = _panelH - y;
     if (alignedW == 0 || h == 0) return;
 
-    // Якщо це локальний updateArea, ми спочатку підвантажимо пікселі
-    // (Але якщо це викликається після display() - loadImageStart вже увімкнув живлення)
+    // If this is local updateArea, we will load pixels first
+    // (But if this is called after display() - loadImageStart has already turned on the power)
     powerOn(); 
 
     waitForReady();
@@ -483,8 +483,8 @@ void IT8951Class::displayArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, ui
     writeData(mode);
 
     uint32_t t0 = millis();
-    delay(50); // дати час рушію оновлення запуститися
-    uint32_t timeout = 10000; // Ліміт очікування 10 секунд
+    delay(50); // allow time for the update engine to start
+    uint32_t timeout = 10000; // Wait limit 10 seconds
     while (isEngineBusy()) {
         if (millis() - t0 > timeout) {
             Serial.println("[IT8951] WARNING: display refresh timeout (Engine Busy)!");
@@ -494,11 +494,11 @@ void IT8951Class::displayArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, ui
     }
     Serial.printf("[IT8951] Refresh area done in %lu ms\n", millis() - t0);
 
-    // АВТОМАТИЧНЕ ВИМКНЕННЯ VCOM ПІСЛЯ ЗАВЕРШЕННЯ ОНОВЛЕННЯ
+    // AUTOMATIC VCOM POWER OFF AFTER UPDATE COMPLETION
     powerOff();
 }
 
-// Завантаження та виведення окремої області кадру без динамічної алокації
+// Loading and rendering of a specific frame area without dynamic allocation
 void IT8951Class::updateArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t mode) {
     uint16_t alignedX = x & ~1;
     uint16_t alignedW = (w + 1) & ~1;
@@ -518,16 +518,16 @@ void IT8951Class::updateArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uin
         .areaW = alignedW, .areaH = h
     };
 
-    // Завантажуємо дані області
+    // Load area data
     loadImageStart(&imgInfo, &areaInfo);
     loadAreaPixels_4bpp(_imgBuf, alignedX, y, alignedW, h);
     loadImageEnd();
 
-    // Оновлюємо область на екрані
+    // Update area on screen
     displayArea(alignedX, y, alignedW, h, mode);
 }
 
-// ── Графічні функції canvas (4bpp формат) ──────────────────────
+// ── Canvas graphic functions (4bpp format) ──────────────────────
 
 void IT8951Class::drawPixel(uint16_t x, uint16_t y, uint8_t color) {
     if (x >= _panelW || y >= _panelH) return;
@@ -536,9 +536,9 @@ void IT8951Class::drawPixel(uint16_t x, uint16_t y, uint8_t color) {
     uint8_t c4 = color >> 4; // 8bpp -> 4bpp
     
     if (x % 2 == 0) {
-        _imgBuf[idx] = (_imgBuf[idx] & 0x0F) | (c4 << 4); // Старший нібл (лівий піксель)
+        _imgBuf[idx] = (_imgBuf[idx] & 0x0F) | (c4 << 4); // High nibble (left pixel)
     } else {
-        _imgBuf[idx] = (_imgBuf[idx] & 0xF0) | c4;        // Молодший нібл (правий піксель)
+        _imgBuf[idx] = (_imgBuf[idx] & 0xF0) | c4;        // Low nibble (right pixel)
     }
 }
 
@@ -550,7 +550,7 @@ void IT8951Class::drawRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8
         for (uint16_t r = 0; r < h; r++) {
             if (y + r >= _panelH) break;
             
-            // Оптимізація memset для парних координат
+            // memset optimization for even coordinates
             if (x % 2 == 0 && w % 2 == 0) {
                 uint32_t idx = ((uint32_t)(y + r) * _panelW + x) / 2;
                 memset(_imgBuf + idx, byteColor, w / 2);
@@ -668,7 +668,7 @@ void IT8951Class::drawCyrillicText(uint16_t x, uint16_t y, const char* str, uint
         
         uint8_t c = utf8_to_cp1251(p);
         
-        // Зчитуємо інформацію про гліф з PROGMEM
+        // Read glyph info from PROGMEM
         IrpinGlyph glyph;
         memcpy_P(&glyph, &irpinFont.glyphs[c], sizeof(IrpinGlyph));
         
