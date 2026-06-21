@@ -1,0 +1,21 @@
+{
+  "name": "epd-ite8951-gdep133ut3-esp32s3-driver",
+  "version": "1.0.0",
+  "description": "C++ E-Ink driver for GDEP133UT3 (GoodDisplay, 13.3, 1600x1200) & IT8951 (DEJA-TC103) controller on ESP32-S3. Supports PSRAM framebuffering, full 16-level grayscale, fast partial updates, and on-the-fly TrueType (TTF) font rendering via LittleFS. Requires PSRAM.",
+  "keywords": "e-ink, gdep133ut3, epaper, it8951, esp32-s3, display, graphics, ttf, truetype",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JustKovalchuk/epd-ite8951-gdep133ut3-esp32s3-driver.git"
+  },
+  "authors": [
+    {
+      "name": "JustKovalchuk",
+      "maintainer": true
+    }
+  ],
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "headers": [
+    "IT8951.h"
+  ]
+}
