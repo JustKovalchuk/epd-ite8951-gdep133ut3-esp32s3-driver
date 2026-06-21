@@ -47,14 +47,14 @@ Use 14-pin FFC (Flexible Flat Cable).
 | IT8951 / DEJA-TC103 TCON (SPI) | ESP32-S3 Pin | Description |
 |--------------------------|--------------|-------------|
 | **1.**                   | GND          | GNDD |
-| **2. HOST_HRDY**         | GPIO 4       | Hardware Ready (Busy / Wait Signal) |
-| **3. RESET**             | GPIO 5       | Hardware Reset |
+| **2. HOST_HRDY**         | GPIO 6       | Hardware Ready (Busy / Wait Signal) |
+| **3. RESET**             | GPIO 7       | Hardware Reset |
 | **4. SPI2_CS**           | GPIO 10      | Chip Select |
 | **5. SPI2_SCK**          | GPIO 12      | Serial Clock |
 | **6. SPI2_MOSI**         | GPIO 11      | Master Out Slave In |
 | **7. SPI2_MISO**         | GPIO 13      | Master In Slave Out |
 | **8.**                   | GND          | GNDD |
-| **9. POWER_CTRL**        | GPIO 6       | Power Line Circuit Control (Optional) |
+| **9. POWER_CTRL**        | GPIO 5       | Power Line Circuit Control (Optional) |
 | **10.**                  | GND          | GNDD |
 | **11.**                  | -            | Not connected |
 | **12.**                  | +5V          | +5V |
