@@ -60,11 +60,14 @@ IT8951Class::IT8951Class() :
     _panelH(1200),
     _isPowered(false),
     _currentTemp(-99),
+    _rotation(0),
+    _spi(nullptr),
     _ttfBuffer(nullptr),
     _ttfLoaded(false),
     _ttfScale(0.0f),
     _ttfHeight(0),
-    _fontInfoRaw(nullptr) {
+    _fontInfoRaw(nullptr),
+    _spiTimeout(2000) {
 }
 
 // Destructor
@@ -73,6 +76,10 @@ IT8951Class::~IT8951Class() {
     if (_imgBuf) {
         free(_imgBuf);
         _imgBuf = nullptr;
+    }
+    if (_spi) {
+        delete _spi;
+        _spi = nullptr;
     }
 }
 
@@ -109,65 +116,98 @@ bool IT8951Class::begin(uint16_t vcom, int8_t sck, int8_t miso, int8_t mosi, int
     memset(_imgBuf, 0xFF, bufSize);
 
     // SPI Initialization
-    SPI.begin(_pinSCK, _pinMISO, _pinMOSI, _pinCS);
-    SPI.beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
+    if (_spi) delete _spi;
+    _spi = new SPIClass(HSPI);
+    _spi->begin(_pinSCK, _pinMISO, _pinMOSI, _pinCS);
 
-    // Turn on power and configure display
-    powerOn();
+    // Turn on power and configure display (force reset on initialization)
+    powerOn(true);
 
     // Get DevInfo
     IT8951DevInfo devInfo;
     getDeviceInfo(&devInfo);
-    _panelW = devInfo.panelW;
-    _panelH = devInfo.panelH;
-    
+    if (devInfo.panelW > 0 && devInfo.panelW <= 4096 && devInfo.panelH > 0 && devInfo.panelH <= 4096) {
+        _panelW = devInfo.panelW;
+        _panelH = devInfo.panelH;
+
+    } else {
+        Serial.printf("[IT8951] WARNING: Invalid DevInfo panel resolution (%dx%d). Keeping defaults: %dx%d\n",
+                      devInfo.panelW, devInfo.panelH, _panelW, _panelH);
+    }
+
     // Turn off display power after full initialization (will turn on dynamically)
     powerOff();
 
-    Serial.println("[IT8951] Library initialized successfully");
     return true;
 }
 
 // ── Low-level SPI functions ──────────────────────────────
 
-void IT8951Class::waitForReady(uint32_t timeoutMs) {
+void IT8951Class::waitForSPIReady(uint32_t timeoutMs) {
+    if (timeoutMs == 0) timeoutMs = _spiTimeout;
     uint32_t start = millis();
     while (digitalRead(_pinHRDY) == LOW) {
         if (millis() - start > timeoutMs) {
-            Serial.printf("[IT8951] !! WaitForReady timeout (%lu ms) !!\n", timeoutMs);
             return;
         }
-        delayMicroseconds(10);
     }
 }
 
 void IT8951Class::writeCmd(uint16_t cmd) {
-    waitForReady();
+    _spi->beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
+
     csLow();
-    SPI.transfer16(PREAMBLE_CMD);
-    waitForReady();
-    SPI.transfer16(cmd);
+
+    waitForSPIReady();
+    _spi->transfer16(PREAMBLE_CMD);
+
+    waitForSPIReady();
+    _spi->transfer16(cmd);
+
+    delayMicroseconds(1);
+
     csHigh();
+
+    _spi->endTransaction();
 }
 
 void IT8951Class::writeData(uint16_t data) {
-    waitForReady();
+    _spi->beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
+
     csLow();
-    SPI.transfer16(PREAMBLE_WRITE);
-    waitForReady();
-    SPI.transfer16(data);
+
+    waitForSPIReady();
+    _spi->transfer16(PREAMBLE_WRITE);
+
+    waitForSPIReady();
+    _spi->transfer16(data);
+
+    delayMicroseconds(1);
+
     csHigh();
+
+    _spi->endTransaction();
 }
 
 uint16_t IT8951Class::readData() {
-    waitForReady();
+    _spi->beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
+
     csLow();
-    SPI.transfer16(PREAMBLE_READ);
-    waitForReady();
-    SPI.transfer16(0x0000); // dummy
-    waitForReady();
-    uint16_t val = SPI.transfer16(0x0000);
+
+    waitForSPIReady();
+    _spi->transfer16(PREAMBLE_READ);
+
+    waitForSPIReady();
+    _spi->transfer16(0x0000); // dummy
+
+    waitForSPIReady();
+    uint16_t val = _spi->transfer16(0x0000);
+
+    delayMicroseconds(1);
+
     csHigh();
+
+    _spi->endTransaction();
     return val;
 }
 
@@ -184,74 +224,123 @@ uint16_t IT8951Class::readReg(uint16_t addr) {
 }
 
 void IT8951Class::reset() {
-    digitalWrite(_pinRST, LOW);
-    delay(200);
     digitalWrite(_pinRST, HIGH);
-    delay(200);
-    waitForReady(2000); // Give the controller up to 2 seconds to launch the system ROM
+    delay(20);
+    digitalWrite(_pinRST, LOW);
+    delay(30);
+    digitalWrite(_pinRST, HIGH);
+    delay(30);
+    waitForSPIReady(2000); // Give the controller up to 2 seconds to launch the system ROM
 }
 
 void IT8951Class::getDeviceInfo(IT8951DevInfo* info) {
     writeCmd(IT8951_TCON_GET_DEV_INFO);
 
-    waitForReady();
+    _spi->beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
     csLow();
-    SPI.transfer16(PREAMBLE_READ);
-    waitForReady();
-    SPI.transfer16(0x0000); // dummy
-    waitForReady();
+    waitForSPIReady();
+    _spi->transfer16(PREAMBLE_READ);
+    waitForSPIReady();
+    _spi->transfer16(0x0000); // dummy
+    waitForSPIReady();
 
     uint16_t* p = (uint16_t*)info;
     size_t words = sizeof(IT8951DevInfo) / 2;
     for (size_t i = 0; i < words; i++) {
-        waitForReady();
-        p[i] = SPI.transfer16(0x0000);
+        waitForSPIReady();
+        p[i] = _spi->transfer16(0x0000);
     }
+    delayMicroseconds(1);
     csHigh();
+    _spi->endTransaction();
 
     _imgBufAddr = ((uint32_t)info->imgBufAddrH << 16) | info->imgBufAddrL;
+}
+
+void IT8951Class::memBurstReadProc(uint32_t memAddr, uint32_t readSizeWords, uint16_t* destBuf) {
+    memBurstReadTrigger(memAddr, readSizeWords);
+    memBurstReadStart();
+    
+    _spi->beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
+    csLow();
+    waitForSPIReady();
+    _spi->transfer16(PREAMBLE_READ);
+    waitForSPIReady();
+    _spi->transfer16(0x0000); // dummy
+    
+    for (uint32_t i = 0; i < readSizeWords; i++) {
+        waitForSPIReady();
+        destBuf[i] = _spi->transfer16(0x0000);
+    }
+    
+    delayMicroseconds(1);
+    csHigh();
+    _spi->endTransaction();
+    
+    memBurstEnd();
+}
+
+void IT8951Class::memBurstReadStart() {
+    writeCmd(IT8951_TCON_MEM_BST_RD_S);
+}
+
+void IT8951Class::memBurstReadTrigger(uint32_t memAddr, uint32_t readSizeWords) {
+    writeCmd(IT8951_TCON_MEM_BST_RD_T);
+    writeData((uint16_t)(memAddr & 0xFFFF));
+    writeData((uint16_t)((memAddr >> 16) & 0xFFFF));
+    writeData((uint16_t)(readSizeWords & 0xFFFF));
+    writeData((uint16_t)((readSizeWords >> 16) & 0xFFFF));
+}
+
+void IT8951Class::memBurstEnd() {
+    writeCmd(IT8951_TCON_MEM_BST_END);
 }
 
 void IT8951Class::setVCOM(uint16_t vcom) {
     writeCmd(IT8951_TCON_PMIC_CTL);
     writeData(vcom);
     writeData(0x0001); // apply
-    delay(100);
-    Serial.printf("[IT8951] VCOM set to -%d mV\n", vcom);
+    delay(20);
+
 }
 
 // ── Power ──────────────────────────────────────────────────
 
-void IT8951Class::powerOn() {
+void IT8951Class::powerOn(bool forceReset) {
     if (_isPowered) return;
     
     // Turn on the power line (if connected)
     digitalWrite(_pinPWR, HIGH);
     delay(50); // Allow power to stabilize
     
-    bool needReset = false;
+    bool needReset = forceReset;
     
     // If HRDY is low after power on, the chip is definitely inactive/needs reset
-    if (digitalRead(_pinHRDY) == LOW) {
+    if (!needReset && digitalRead(_pinHRDY) == LOW) {
         needReset = true;
-    } else {
+    } else if (!needReset) {
         // HRDY is high, try to wake up and read test register
-        // Use a short 20ms timeout to avoid hanging if the chip is unresponsive
-        waitForReady(20); 
-        writeCmd(IT8951_TCON_SYS_RUN);
+        // Use a short 50ms timeout to avoid hanging if the chip is unresponsive
+        uint32_t oldTimeout = _spiTimeout;
+        _spiTimeout = 50;
+
+        waitForSPIReady(); 
+        writeCmd(IT8951_TCON_SYS_RUN); // ? чи треба тут (у розробників не використовується)
         delay(20);
         
         uint16_t testVal = readReg(REG_I80CPCR);
         if (testVal != 0x0001) {
             needReset = true;
         }
+
+        _spiTimeout = oldTimeout;
     }
     
     if (needReset) {
         Serial.println("[IT8951] Chip registers lost or unresponsive. Performing full hard reset...");
         reset();
         
-        writeCmd(IT8951_TCON_SYS_RUN);
+        writeCmd(IT8951_TCON_SYS_RUN); // ? чи треба тут (у розробників не використовується)
         delay(10);
         
         writeReg(REG_I80CPCR, 0x0001);
@@ -265,23 +354,21 @@ void IT8951Class::powerOn() {
     // Restore temperature settings if they were set
     if (_currentTemp != -99) {
         writeReg(REG_TEMP, (uint16_t)_currentTemp);
-        Serial.printf("[IT8951] Restored temperature setting to: %d C\n", _currentTemp);
+
     }
     
     _isPowered = true;
-    Serial.println("[IT8951] Power ON sequence completed successfully.");
 }
 
 void IT8951Class::powerOff() {
     if (!_isPowered) return;
     
-    Serial.println("[IT8951] Powering OFF...");
+
     writeCmd(IT8951_TCON_SLEEP);
     delay(50);
     digitalWrite(_pinPWR, LOW);
     
     _isPowered = false;
-    Serial.println("[IT8951] Power OFF sequence completed successfully.");
 }
 
 void IT8951Class::sleep() {
@@ -298,9 +385,9 @@ void IT8951Class::setTemperature(int8_t temp) {
     _currentTemp = temp;
     if (_isPowered) {
         writeReg(REG_TEMP, (uint16_t)temp);
-        Serial.printf("[IT8951] Forced temperature set to: %d C\n", temp);
+
     } else {
-        Serial.printf("[IT8951] Temperature set to %d C (will be applied on powerOn)\n", temp);
+
     }
 }
 
@@ -320,14 +407,33 @@ int8_t IT8951Class::readTemperature() {
     return (int8_t)(rawTemp & 0xFF);
 }
 
-bool IT8951Class::isEngineBusy() {
+bool IT8951Class::isDisplayBusy() {
     if (!_isPowered) return false; // If power is off, the engine cannot be busy
-    return (readReg(0x1224) != 0);
+    return (readReg(REG_LUTAFSR) != 0);
 }
 
 // ── Loading pixels ────────────────────────────────────
 
-void IT8951Class::loadImageStart(IT8951LdImgInfo* imgInfo, IT8951AreaImgInfo* areaInfo) {
+void IT8951Class::loadImageStart(IT8951LdImgInfo* imgInfo) {
+    powerOn(); // Ensure power is turned on before operation
+
+    writeReg(REG_LISAR,  (uint16_t)(_imgBufAddr & 0xFFFF));
+    writeReg(REG_LISARH, (uint16_t)(_imgBufAddr >> 16));
+
+    // Convert 2, 3, 4, 8 BPP to internal IT8951 code (0, 1, 2, 3)
+    uint16_t bppCode = 2; // default is 4bpp
+    if (imgInfo->pixelFormat == 2) bppCode = 0;
+    else if (imgInfo->pixelFormat == 3) bppCode = 1;
+    else if (imgInfo->pixelFormat == 4) bppCode = 2;
+    else if (imgInfo->pixelFormat == 8) bppCode = 3;
+
+    writeCmd(IT8951_TCON_LD_IMG);
+    writeData((imgInfo->endianType   << 8) |
+              (bppCode               << 4) |
+              (imgInfo->rotate));
+}
+
+void IT8951Class::loadImageAreaStart(IT8951LdImgInfo* imgInfo, IT8951AreaImgInfo* areaInfo) {
     powerOn(); // Ensure power is turned on before operation
 
     writeReg(REG_LISAR,  (uint16_t)(_imgBufAddr & 0xFFFF));
@@ -356,29 +462,39 @@ void IT8951Class::loadImageEnd() {
 }
 
 void IT8951Class::loadBulkPixels(const uint8_t* buf, uint32_t totalBytes) {
-    waitForReady();
-    csLow();
-    SPI.transfer16(PREAMBLE_WRITE);
-    waitForReady();
+    _spi->beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
 
+    csLow();
+    
+    waitForSPIReady();
+    _spi->transfer16(PREAMBLE_WRITE);
+
+    waitForSPIReady();
     uint32_t sent = 0;
     while (sent < totalBytes) {
         uint32_t chunk = totalBytes - sent;
         if (chunk > SPI_DMA_MAX) chunk = SPI_DMA_MAX;
         
         memcpy(_dmaBuf, buf + sent, chunk);
-        SPI.transferBytes(_dmaBuf, nullptr, chunk);
+        _spi->transferBytes(_dmaBuf, nullptr, chunk);
         sent += chunk;
     }
+
+    delayMicroseconds(1);
+
     csHigh();
+    _spi->endTransaction();
 }
 
 void IT8951Class::loadAreaPixels_4bpp(const uint8_t* canvas, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
-    waitForReady();
-    csLow();
-    SPI.transfer16(PREAMBLE_WRITE);
-    waitForReady();
+    _spi->beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
 
+    csLow();
+
+    waitForSPIReady();
+    _spi->transfer16(PREAMBLE_WRITE);
+
+    waitForSPIReady();
     uint16_t w_bytes = w / 2; // 4bpp
     uint16_t row_stride_bytes = _panelW / 2;
     
@@ -387,9 +503,13 @@ void IT8951Class::loadAreaPixels_4bpp(const uint8_t* canvas, uint16_t x, uint16_
         
         // Copy one row to SRAM DMA buffer
         memcpy(_dmaBuf, canvas + srcIdx, w_bytes);
-        SPI.transferBytes(_dmaBuf, nullptr, w_bytes);
+        _spi->transferBytes(_dmaBuf, nullptr, w_bytes);
     }
+
+    delayMicroseconds(1);
+
     csHigh();
+    _spi->endTransaction();
 }
 
 // ── Refresh (Display) ──────────────────────────────────
@@ -406,41 +526,44 @@ void IT8951Class::clear(uint8_t color, uint8_t mode) {
 }
 
 void IT8951Class::clearScreen() {
-    Serial.println("[IT8951] ClearScreen: loading white frame...");
+
 
     IT8951LdImgInfo imgInfo = {
         .endianType = 1, .pixelFormat = 4, .rotate = 0,
         .pSrcBufferAddr = nullptr, .pBufAddr = nullptr
     };
-    IT8951AreaImgInfo areaInfo = {
-        .areaX = 0, .areaY = 0,
-        .areaW = _panelW, .areaH = _panelH
-    };
-    loadImageStart(&imgInfo, &areaInfo);
+    loadImageStart(&imgInfo);
 
     static uint8_t whiteBuf[SPI_DMA_MAX] __attribute__((aligned(4)));
     static bool whiteReady = false;
     if (!whiteReady) { memset(whiteBuf, 0xFF, SPI_DMA_MAX); whiteReady = true; }
 
     uint32_t totalBytes = ((uint32_t)_panelW * _panelH) / 2; // DIVISION BY 2 FOR 4bpp!
-    waitForReady();
-    csLow();
-    SPI.transfer16(PREAMBLE_WRITE);
-    waitForReady();
     
+    _spi->beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
+    csLow();
+    
+    waitForSPIReady();
+    _spi->transfer16(PREAMBLE_WRITE);
+
+    waitForSPIReady();
     uint32_t sent = 0;
     while (sent < totalBytes) {
         uint32_t chunk = totalBytes - sent;
         if (chunk > SPI_DMA_MAX) chunk = SPI_DMA_MAX;
-        SPI.transferBytes(whiteBuf, nullptr, chunk);
+        _spi->transferBytes(whiteBuf, nullptr, chunk);
         sent += chunk;
     }
+
+    delayMicroseconds(1);
+    
     csHigh();
+    _spi->endTransaction();
 
     loadImageEnd();
-    Serial.println("[IT8951] ClearScreen: INIT refresh (0x0034)...");
+
     displayArea(0, 0, _panelW, _panelH, UPDATE_MODE_INIT);
-    Serial.println("[IT8951] ClearScreen done.");
+
 }
 
 void IT8951Class::display(uint8_t mode) {
@@ -448,12 +571,7 @@ void IT8951Class::display(uint8_t mode) {
         .endianType = _endianType, .pixelFormat = 4, .rotate = 0,
         .pSrcBufferAddr = nullptr, .pBufAddr = nullptr
     };
-    IT8951AreaImgInfo areaInfo = {
-        .areaX = 0, .areaY = 0,
-        .areaW = _panelW, .areaH = _panelH
-    };
-
-    loadImageStart(&imgInfo, &areaInfo);
+    loadImageStart(&imgInfo);
     
     uint32_t totalBytes = ((uint32_t)_panelW * _panelH) / 2; // DIVISION BY 2 FOR 4bpp!
     loadBulkPixels(_imgBuf, totalBytes);
@@ -474,7 +592,7 @@ void IT8951Class::displayArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, ui
     // (But if this is called after display() - loadImageStart has already turned on the power)
     powerOn(); 
 
-    waitForReady();
+    waitForSPIReady();
     writeCmd(IT8951_TCON_DPY_AREA);
     writeData(alignedX);
     writeData(y);
@@ -483,16 +601,16 @@ void IT8951Class::displayArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, ui
     writeData(mode);
 
     uint32_t t0 = millis();
-    delay(50); // allow time for the update engine to start
+    
+    delayMicroseconds(5000); // 5 ms — minimal ramp-up, was 50 ms
     uint32_t timeout = 10000; // Wait limit 10 seconds
-    while (isEngineBusy()) {
+    while (isDisplayBusy()) {
         if (millis() - t0 > timeout) {
             Serial.println("[IT8951] WARNING: display refresh timeout (Engine Busy)!");
             break;
         }
-        delay(10);
+        delay(2); // was delay(10) — 5× finer resolution
     }
-    Serial.printf("[IT8951] Refresh area done in %lu ms\n", millis() - t0);
 
     // AUTOMATIC VCOM POWER OFF AFTER UPDATE COMPLETION
     powerOff();
@@ -519,7 +637,7 @@ void IT8951Class::updateArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uin
     };
 
     // Load area data
-    loadImageStart(&imgInfo, &areaInfo);
+    loadImageAreaStart(&imgInfo, &areaInfo);
     loadAreaPixels_4bpp(_imgBuf, alignedX, y, alignedW, h);
     loadImageEnd();
 
@@ -530,12 +648,26 @@ void IT8951Class::updateArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uin
 // ── Canvas graphic functions (4bpp format) ──────────────────────
 
 void IT8951Class::drawPixel(uint16_t x, uint16_t y, uint8_t color) {
-    if (x >= _panelW || y >= _panelH) return;
+    if (x >= getWidth() || y >= getHeight()) return;
     
-    uint32_t idx = ((uint32_t)y * _panelW + x) / 2;
+    uint16_t physX = x;
+    uint16_t physY = y;
+    
+    if (_rotation == 1) { // 90° CW
+        physX = _panelW - 1 - y;
+        physY = x;
+    } else if (_rotation == 2) { // 180°
+        physX = _panelW - 1 - x;
+        physY = _panelH - 1 - y;
+    } else if (_rotation == 3) { // 270° CW / 90° CCW
+        physX = y;
+        physY = _panelH - 1 - x;
+    }
+    
+    uint32_t idx = ((uint32_t)physY * _panelW + physX) / 2;
     uint8_t c4 = color >> 4; // 8bpp -> 4bpp
     
-    if (x % 2 == 0) {
+    if (physX % 2 == 0) {
         _imgBuf[idx] = (_imgBuf[idx] & 0x0F) | (c4 << 4); // High nibble (left pixel)
     } else {
         _imgBuf[idx] = (_imgBuf[idx] & 0xF0) | c4;        // Low nibble (right pixel)
@@ -548,10 +680,10 @@ void IT8951Class::drawRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8
         uint8_t byteColor = (c4 << 4) | c4;
         
         for (uint16_t r = 0; r < h; r++) {
-            if (y + r >= _panelH) break;
+            if (y + r >= getHeight()) break;
             
-            // memset optimization for even coordinates
-            if (x % 2 == 0 && w % 2 == 0) {
+            // memset optimization is only valid when rotation is 0
+            if (_rotation == 0 && x % 2 == 0 && w % 2 == 0) {
                 uint32_t idx = ((uint32_t)(y + r) * _panelW + x) / 2;
                 memset(_imgBuf + idx, byteColor, w / 2);
             } else {
@@ -683,11 +815,11 @@ void IT8951Class::drawCyrillicText(uint16_t x, uint16_t y, const char* str, uint
                 
                 for (uint8_t r = 0; r < glyph.height; r++) {
                     uint16_t pixelY = curY + (glyph.yOffset + r) * scale;
-                    if (pixelY >= _panelH) continue;
+                    if (pixelY >= getHeight()) continue;
                     
                     for (uint8_t col = 0; col < glyph.width; col++) {
                         uint16_t pixelX = curX + (glyph.xOffset + col) * scale;
-                        if (pixelX >= _panelW) continue;
+                        if (pixelX >= getWidth()) continue;
                         
                         uint16_t byte_idx = glyph.bitmapOffset + r * row_bytes + (col / 8);
                         uint8_t bit_pos = 7 - (col % 8);
@@ -737,9 +869,24 @@ size_t IT8951Class::getCyrillicTextWidth(const char* str, uint8_t scale) {
 }
 
 uint8_t IT8951Class::getPixel(uint16_t x, uint16_t y) {
-    if (x >= _panelW || y >= _panelH || !_imgBuf) return 255;
-    uint32_t idx = ((uint32_t)y * _panelW + x) / 2;
-    if (x % 2 == 0) {
+    if (x >= getWidth() || y >= getHeight() || !_imgBuf) return 255;
+    
+    uint16_t physX = x;
+    uint16_t physY = y;
+    
+    if (_rotation == 1) { // 90° CW
+        physX = _panelW - 1 - y;
+        physY = x;
+    } else if (_rotation == 2) { // 180°
+        physX = _panelW - 1 - x;
+        physY = _panelH - 1 - y;
+    } else if (_rotation == 3) { // 270° CW / 90° CCW
+        physX = y;
+        physY = _panelH - 1 - x;
+    }
+    
+    uint32_t idx = ((uint32_t)physY * _panelW + physX) / 2;
+    if (physX % 2 == 0) {
         return (_imgBuf[idx] >> 4) << 4;
     } else {
         return (_imgBuf[idx] & 0x0F) << 4;
@@ -794,7 +941,7 @@ bool IT8951Class::loadTTF(fs::FS &fs, const char* path, uint16_t pixelHeight) {
     _ttfScale = stbtt_ScaleForPixelHeight(info, (float)pixelHeight);
     _ttfLoaded = true;
     
-    Serial.printf("[TTF] Font %s successfully loaded. Height: %d px, Scale: %f\n", path, pixelHeight, _ttfScale);
+
     return true;
 }
 
@@ -811,7 +958,7 @@ void IT8951Class::unloadTTF() {
         _ttfLoaded = false;
         _ttfHeight = 0;
         _ttfScale = 0.0f;
-        Serial.println("[TTF] Font unloaded.");
+
     }
 }
 
@@ -898,11 +1045,11 @@ void IT8951Class::drawTTFText(uint16_t x, uint16_t y, const char* str, uint8_t c
         if (bitmap) {
             for (int r = 0; r < h; r++) {
                 int pixelY = curY + yoff + r;
-                if (pixelY < 0 || pixelY >= _panelH) continue;
+                if (pixelY < 0 || pixelY >= getHeight()) continue;
                 
                 for (int c = 0; c < w; c++) {
                     int pixelX = curX + xoff + c;
-                    if (pixelX < 0 || pixelX >= _panelW) continue;
+                    if (pixelX < 0 || pixelX >= getWidth()) continue;
                     
                     uint8_t alpha = bitmap[r * w + c];
                     if (alpha > 0) {
